@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stockroom App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 100%;
+            margin: 20px auto;
+            background: #fff;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            box-sizing: border-box;
+        }
+        h1 {
+            text-align: center;
+        }
+        input[type="text"],
+        input[type="number"],
+        input[type="file"],
+        input[type="date"],
+        input[type="Barcode"] {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        button {
+            padding: 15px;
+            margin: 10px 0;
+            width: 100%;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .item-list {
+            margin-top: 20px;
+        }
+        .item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: #f9f9f9;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .item button {
+            margin: 5px 0;
+            padding: 10px;
+            flex: 1;
+            font-size: 14px;
+        }
+        .item img {
+            max-width: 80px;
+            max-height: 80px;
+            margin-right: 10px;
+        }
+        #stockCount {
+            margin-top: 20px;
+            font-weight: bold;
+            text-align: center;
+        }
+        #inventoryView {
+            display: none;
+        }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .pagination button {
+            margin: 0 5px;
+        }
+        @media (min-width: 600px) {
+            input[type="text"],
+            input[type="number"],
+            input[type="file"],
+            input[type="date"],
+            input[type="Barcode"] {
+                width: calc(50% - 10px);
+                margin: 5px;
+            }
+            button {
+                width: calc(50% - 10px);
+            }
+            .item {
+                flex-wrap: nowrap;
+            }
+            .item button {
+                margin-left: 5px;
+            }
+        }
+    </style>
+    <!-- Include QuaggaJS library -->
+    <script src="https://cdn.jsdelivr.net/npm/quagga"></script>
+</head>
+<body>
+    <div class="container" id="mainView">
+        <h1>Stockroom App</h1>
+        <input type="text" id="itemName" placeholder="Item Name">
+        <input type="number" id="itemQuantity" placeholder="Quantity">
+        <input type="date" id="itemExpiryDate">
+        <input type="text" id="Barcode" placeholder="Barcode Number">
+        <input type="file" id="itemImage" accept="image/*">
+        <button id="addItemButton">Add Item</button>
+        <button id="viewInventoryButton">View Inventory</button>
+        <!-- Button for barcode scanning -->
+        <button id="scanBarcodeButton">Scan Barcode</button>
+    </div>
+
+    <div class="container" id="inventoryView">
+        <button id="backButton">Back</button>
+        <div class="item-list" id="itemList">
+            <!-- Items will be displayed here -->
+        </div>
+        <div class="pagination">
+            <button id="prevPageButton">Previous</button>
+            <span id="pageNumber">Page 1</span>
+            <button id="nextPageButton">Next</button>
+        </div>
+        <div id="stockCount">Items in Stock: 0</div>
+    </div>
+
+    <script>
+        const itemNameInput = document.getElementById('itemName');
+        const itemQuantityInput = document.getElementById('itemQuantity');
+        const itemExpiryDateInput = document.getElementById('itemExpiryDate');
+        const barcodeInput = document.getElementById('Barcode');
+        const itemImageInput = document.getElementById('itemImage');
+        const addItemButton = document.getElementById('addItemButton');
+        const itemList = document.getElementById('itemList');
+        const stockCount = document.getElementById('stockCount');
+        const viewInventoryButton = document.getElementById('viewInventoryButton');
+        const backButton = document.getElementById('backButton');
+        const mainView = document.getElementById('mainView');
+        const inventoryView = document.getElementById('inventoryView');
+        const scanBarcodeButton = document.getElementById('scanBarcodeButton');
+        const prevPageButton = document.getElementById('prevPageButton');
+        const nextPageButton = document.getElementById('nextPageButton');
+        const pageNumber = document.getElementById('pageNumber');
+
+        const itemsPerPage = 10;
+        let currentPage = 1;
+        let db;
+
+        // Initialize IndexedDB
+        const request = indexedDB.open("StockroomDB", 1);
+
+        request.onerror = function(event) {
+            console.log("Database error: " + event.target.errorCode);
+        };
+
+        request.onsuccess = function(event) {
+            db = event.target.result;
+            displayItems();
+            updateStockCount();
+        };
+
+        request.onupgradeneeded = function(event) {
+            db = event.target.result;
+            const objectStore = db.createObjectStore("items", { keyPath: "name" });
+            objectStore.createIndex("name", "name", { unique: true });
+            objectStore.createIndex("quantity", "quantity", { unique: false });
+            objectStore.createIndex("expiryDate", "expiryDate", { unique: false });
+            objectStore.createIndex("image", "image", { unique: false });
+        };
+
+        // Initialize QuaggaJS barcode scanner
+        Quagga.init({
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: document.querySelector('#mainView') // This will be the target area for scanning
+            },
+            decoder: {
+                readers: ["ean_reader"] // Configure to read EAN barcodes
+            }
+        }, function(err) {
+            if (err) {
+                console.log(err);
+                return;
+            }
+            console.log("Initialization finished. Ready to start");
+        });
+
+        // Event listener for barcode detection
+        Quagga.onDetected(function(data) {
+            const barcode = data.codeResult.code;
+            alert('Barcode detected: ' + barcode);
+            barcodeInput.value = barcode;
+        });
+
+        function updateStockCount() {
+            const transaction = db.transaction(["items"], "readonly");
+            const objectStore = transaction.objectStore("items");
+            let totalStock = 0;
+
+            objectStore.openCursor().onsuccess = function(event) {
+                const cursor = event.target.result;
+                if (cursor) {
+                    totalStock += cursor.value.quantity;
+                    cursor.continue();
+                } else {
+                    stockCount.textContent = `Items in Stock: ${totalStock}`;
+                }
+            };
+        }
+
+        function displayItems() {
+            itemList.innerHTML = ''; // Clear existing items
+            const transaction = db.transaction(["items"], "readonly");
+            const objectStore = transaction.objectStore("items");
+
+            const itemArray = [];
+            objectStore.openCursor().onsuccess = function(event) {
+                const cursor = event.target.result;
+                if (cursor) {
+                    itemArray.push(cursor.value);
+                    cursor.continue();
+                } else {
+                    const startIndex = (currentPage - 1) * itemsPerPage;
+                    const endIndex = Math.min(startIndex + itemsPerPage, itemArray.length);
+
+                    for (let i = startIndex; i < endIndex; i++) {
+                        const item = itemArray[i];
+                        const itemElement = document.createElement('div');
+                        itemElement.classList.add('item');
+                        itemElement.innerHTML = `
+                            <div>
+                                <img src="${item.image}" alt="${item.name}" class="item-image">
+                                ${item.name}: ${item.quantity} (Expiry: ${item.expiryDate})
+                            </div>
+                            <div>
+                                <button class="remove-button" data-item="${item.name}">Remove One</button>
+                                <button class="add-one-button" data-item="${item.name}">Add One</button>
+                            </div>
+                        `;
+                        itemList.appendChild(itemElement);
+
+                        const removeButton = itemElement.querySelector('.remove-button');
+                        removeButton.addEventListener('click', (event) => {
+                            const itemName = event.target.dataset.item;
+                            updateItemQuantity(itemName, -1);
+                        });
+
+                        const addOneButton = itemElement.querySelector('.add-one-button');
+                        addOneButton.addEventListener('click', (event) => {
+                            const itemName = event.target.dataset.item;
+                            updateItemQuantity(itemName, 1);
+                        });
+                    }
+
+                    pageNumber.textContent = `Page ${currentPage}`;
+                    prevPageButton.disabled = currentPage === 1;
+                    nextPageButton.disabled = endIndex >= itemArray.length;
+                }
+            };
+        }
+
+        function updateItemQuantity(itemName, change) {
+            const transaction = db.transaction(["items"], "readwrite");
+            const objectStore = transaction.objectStore("items");
+            const request = objectStore.get(itemName);
+
+            request.onsuccess = function(event) {
+                const data = event.target.result;
+                if (data) {
+                    data.quantity += change;
+                    if (data.quantity <= 0) {
+                        objectStore.delete(itemName);
+                    } else {
+                        objectStore.put(data);
+                    }
+                    displayItems();
+                    updateStockCount();
+                }
+            };
+        }
+
+        addItemButton.addEventListener('click', () => {
+            const itemName = itemNameInput.value.trim();
+            const itemQuantity = parseInt(itemQuantityInput.value);
+            const itemExpiryDate = itemExpiryDateInput.value;
+            const itemImage = itemImageInput.files[0];
+
+            if (itemName && !isNaN(itemQuantity) && itemQuantity >= 0 && itemExpiryDate && itemImage) {
+                const transaction = db.transaction(["items"], "readwrite");
+                const objectStore = transaction.objectStore("items");
+                const request = objectStore.get(itemName);
+
+                request.onsuccess = function(event) {
+                    const data = event.target.result;
+                    if (data) {
+                        data.quantity += itemQuantity;
+                        objectStore.put(data);
+                    } else {
+                        const newItem = {
+                            name: itemName,
+                            quantity: itemQuantity,
+                            expiryDate: itemExpiryDate,
+                            image: URL.createObjectURL(itemImage)
+                        };
+                        objectStore.add(newItem);
+                    }
+                    displayItems();
+                    updateStockCount();
+                };
+
+                itemNameInput.value = '';
+                itemQuantityInput.value = '';
+                itemExpiryDateInput.value = '';
+                itemImageInput.value = '';
+            } else {
+                alert("Please enter valid item name, quantity, expiry date, and upload an image.");
+            }
+        });
+
+        viewInventoryButton.addEventListener('click', () => {
+            mainView.style.display = 'none';
+            inventoryView.style.display = 'block';
+            displayItems();
+        });
+
+        backButton.addEventListener('click', () => {
+            mainView.style.display = 'block';
+            inventoryView.style.display = 'none';
+        });
+
+        prevPageButton.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                displayItems();
+            }
+        });
+
+        nextPageButton.addEventListener('click', () => {
+            const totalItems = itemList.childElementCount;
+            if (currentPage < Math.ceil(totalItems / itemsPerPage)) {
+                currentPage++;
+                displayItems();
+            }
+        });
+
+        scanBarcodeButton.addEventListener('click', () => {
+            Quagga.start();
+        });
+    </script>
+</body>
+</html>
